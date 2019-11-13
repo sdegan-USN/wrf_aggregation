@@ -1,0 +1,178 @@
+ &time_control
+ run_days                            = 1,
+ run_hours                           = 0,
+ run_minutes                         = 0,
+ run_seconds                         = 0,
+ start_year                          = 2010, 2999, 2999,
+ start_month                         = 05,   06,   06,
+ start_day                           = 04,   11,   11,
+ start_hour                          = 00,   12,   12,
+ start_minute                        = 00,   00,   00,
+ start_second                        = 00,   00,   00,
+ end_year                            = 2010, 2999, 2999,
+ end_month                           = 05,   06,   06,
+ end_day                             = 05,   12,   12,
+ end_hour                            = 00,   12,   12,
+ end_minute                          = 00,   00,   00,
+ end_second                          = 00,   00,   00,
+ interval_seconds                    = 21600
+ input_from_file                     = .true.,.true.,.true.,
+ history_interval                    = 60,   60,   60,
+ frames_per_outfile                  = 24, 1000, 1000,
+ restart                             = .false.,
+ restart_interval                    = 00,
+ !auxinput5_interval_m                = 0, 60, 60
+ !io_form_history                     = 2
+ !io_form_restart                     = 2
+ !io_form_input                       = 2
+ !io_form_boundary                    = 2
+ !io_form_auxinput4                   = 0
+ !io_form_auxinput5                   = 0
+ debug_level                          = 00
+ iofields_filename                    = "variable_changes.txt"
+ ignore_iofields_warning              = .true.,
+ /
+
+ &domains
+ time_step                           = 30,
+ time_step_fract_num                 = 0,
+ time_step_fract_den                 = 1,
+ max_dom                             = 1,
+ e_we                                = 500,    112,   94,
+ e_sn                                = 500,    97,    91,
+ e_vert                              = 48,    20,    20,
+ dx                                  = 10000, 20000, 6666.66,
+ dy                                  = 10000, 20000, 6666.66,
+ p_top_requested                     = 5000,
+ num_metgrid_levels                  = 27,
+ num_metgrid_soil_levels             = 4,
+ grid_id                             = 1,     2,     3,
+ parent_id                           = 0,     1,     2,
+ i_parent_start                      = 1,     30,    30,
+ j_parent_start                      = 1,     20,    30,
+ parent_grid_ratio                   = 1,     3,     3,
+ parent_time_step_ratio              = 1,     3,     3,
+ feedback                            = 1,
+ smooth_option                       = 0
+ /
+
+ &physics
+ mp_physics = 10, 10, 2, ! 10
+ mp_zero_out = 2,
+ mp_zero_out_thresh = 1.e-12,
+ ra_sw_physics = 4, 4, 2, ! 2
+ ra_lw_physics = 4, 4, 1, ! 1
+ radt = 10, 10, 3, ! 10
+ mfshconv = 0, 0, 0,
+ bl_pbl_physics = 5, 5, 2, ! 1
+ bl_mynn_edmf = 1,1,
+ bl_mynn_edmf_mom = 1,1,
+ bl_mynn_edmf_tke = 1,1,
+ sf_sfclay_physics = 5, 5, 2, ! 1
+ sf_surface_physics = 2, 2, 2, ! 2
+ num_soil_layers = 4,
+ bldt = 0, 0, 10,
+ cu_physics = 5, 0, 0, ! 3 new in 3.5 !!!! convert_emiss 3
+ cudt = 0, 0, 0,
+ cu_diag = 1, 0, 1, !!!!!! convert_emis 1
+ cu_rad_feedback = .true., .false., .true.,
+ progn = 1, 1, 0,
+ isfflx = 1,
+ ifsnow = 1,
+ icloud = 1,
+ surface_input_source = 1,
+ num_land_cat = 21,
+ sf_urban_physics = 0, 0, 0,
+ maxiens = 1,
+ maxens = 3,
+ maxens2 = 3,
+ maxens3 = 16,
+ ensdim = 144,
+ /
+
+ &fdda
+ /
+
+ &dynamics
+ diff_opt = 1,
+ km_opt = 4,
+ khdif = 0, 0, 0,
+ kvdif = 0, 0, 0,
+ diff_6th_opt = 0, 0, 0, ! diff_6th_opt = 2 ? ? ?
+ diff_6th_factor = 0.12, 0.12, 0.12,
+ w_damping = 1,
+ damp_opt = 0,
+ dampcoef = 0.01, 0.01, 0.01,
+ zdamp = 5000., 5000., 5000.,
+ non_hydrostatic = .true., .true., .true.,
+ base_temp = 288.,
+ base_pres = 100000.,
+ base_lapse = 50.,
+ moist_adv_opt = 2, 2, 1,
+ scalar_adv_opt = 2, 2, 1,
+ chem_adv_opt = 2, 2, 2,
+ tke_adv_opt = 2, 2, 2,
+ time_step_sound = 4, 4, 8,
+ h_mom_adv_order = 5, 5, 5,
+ v_mom_adv_order = 3, 3, 3,
+ h_sca_adv_order = 5, 5, 5,
+ v_sca_adv_order = 3, 3, 3,
+  /
+
+ &bdy_control
+ spec_bdy_width                      = 5,
+ spec_zone                           = 1,
+ relax_zone                          = 4,
+ specified                           = .true., .false.,.false.,
+ nested                              = .false., .true., .true.,
+ /
+
+ &grib2
+ /
+
+ &chem
+ chem_opt = 402, 11,
+ ne_area = 120,
+ chem_conv_tr = 1, 0,  !!!!! convert_emis = 1
+ conv_tr_wetscav = 1, 1,
+ conv_tr_aqchem = 1, 1,
+ chemdiag = 1, 1,
+ kemit = 1,
+ bioemdt = 20, 20,
+ photdt = 10, 10,
+ chemdt = 0.5, 0.0,
+ io_style_emissions= 2, !2
+ emiss_inpt_opt = 1, 1,   !102
+ emiss_opt = 6,5,  !!!!! convert_emis = 3  !14
+ emiss_opt_vol = 2,
+ chem_in_opt = 1, 0 ,
+ gas_drydep_opt = 1, 1,
+ aer_drydep_opt = 1, 1,
+ bio_emiss_opt = 1, 1,,
+ seas_opt = 0, ! 2 for chem_opt=11 or 41
+ dust_opt = 1, ! 2 for chem_opt=11 or 41
+ !dust_schme = 1,
+ gas_bc_opt = 1, 0,
+ gas_ic_opt = 1, 1,
+ aer_bc_opt = 1, 0,
+ aer_ic_opt = 1, 1,
+ gaschem_onoff = 1, 1,
+ aerchem_onoff = 1, 1,
+ wetscav_onoff = 0, 1,
+ cldchem_onoff = 0, 1,
+ vertmix_onoff = 1, 1,
+ biomass_burn_opt = 0, 0,
+ plumerisefire_frq = 0, 0,
+ have_bcs_chem = .false., .false.,
+ phot_opt = 3, 3,  ! 1
+ aer_op_opt = 0, 0,
+ aer_ra_feedback = 0, 0,
+ diagnostic_chem = 0, 0,
+ opt_pars_out = 0,
+ kdo_ass_hr   = .true.,  ! VOLCANO
+ /
+
+ &namelist_quilt
+ nio_tasks_per_group = 0,
+ nio_groups = 1,
+ /

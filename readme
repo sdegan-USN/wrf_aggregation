@@ -1,0 +1,19 @@
+This code is meant to replace and augment existing
+code in the Weather Research Forecasting with Chemsitry
+(WRF-CHEM) atmospheric model such that it will allow the
+model to capture the effects of volcanic aggregation.
+
+The bulk of the changes are to modult_vash_settling.F.
+
+Fortran files need to be placed in the chem subdirectory 
+and registry.chem in the Registry directory. The 
+volc_d01.asc files need to be placed in the em_real
+directory with properly formatted eruption information. 
+
+The name list files are examples to help the user format
+their namelists for WRF and WPS. 
+
+For questions, please contact Sean Egan at 
+sean.d.egan@navy.mil
+sean.egan@navy.smil.mil
+sdegan@alaska.edu

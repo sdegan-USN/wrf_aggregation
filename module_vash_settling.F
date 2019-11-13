@@ -1,0 +1,600 @@
+MODULE MODULE_VASH_SETTLING
+
+CONTAINS
+! Added u and v variables from dry deposition driver - SDE 3/2/16
+SUBROUTINE vash_settling_driver(dt,config_flags,t_phy,moist,               &
+         chem,rho_phy,dz8w,p8w,p_phy,                                      &
+         ash_fall,dx,g,u,v,                                                &
+         ids,ide, jds,jde, kds,kde,                                        &
+         ims,ime, jms,jme, kms,kme,                                        &
+         its,ite, jts,jte, kts,kte                                         )
+  USE module_configure
+  USE module_state_description
+! USE module_domain
+! USE module_io_domain
+! USE module_data_gocart_dust
+! USE module_data_gocart_seas
+  USE module_model_constants, ONLY: mwdry
+  IMPLICIT NONE
+   TYPE(grid_config_rec_type),  INTENT(IN   )    :: config_flags
+
+   INTEGER,      INTENT(IN   ) ::                      &
+                                  ids,ide, jds,jde, kds,kde,               &
+                                  ims,ime, jms,jme, kms,kme,               &
+                                  its,ite, jts,jte, kts,kte
+    REAL, DIMENSION( ims:ime, kms:kme, jms:jme, num_moist ),                &
+         INTENT(IN ) ::                                   moist
+   REAL, DIMENSION( ims:ime, kms:kme, jms:jme, num_chem ),                 &
+         INTENT(INOUT ) ::                                   chem
+!  Added initialization for u and v vectors - SDE 3/2/16
+   REAL,  DIMENSION( ims:ime , kms:kme , jms:jme ),                        &
+          INTENT(IN   ) ::  t_phy,p_phy,dz8w,p8w,rho_phy,u,v
+   REAL,  DIMENSION( ims:ime , jms:jme ),                        &
+          INTENT(INOUT   ) ::  ash_fall
+
+  REAL, INTENT(IN   ) :: dt,dx,g
+  integer :: nmx,i,j,k,kk,lmx,iseas,idust
+! Initializing u_vect array for derreferencing - SDE 2/16/2016
+  real*8, DIMENSION (1,1,kte-kts+1) :: tmp,airden,airmas,p_mid,delz,rh,u_vect
+  REAL*8, DIMENSION (1,1,kte-kts+1) :: q_vapor
+  real*8, DIMENSION (1,1,kte-kts+1,4) :: sea_salt
+  REAL*8, DIMENSION (ims:ime, kms:kme, jms:jme, num_moist) :: t_moist
+!srf
+  real*8, DIMENSION (1,1,kte-kts+1,10) :: ash
+! Added vector for ash density in case we want to give each bin a
+! different ash density. Parameterized for 2500 g/m3 currently. SDE 12/2015
+  real*8, DIMENSION (10), PARAMETER :: den_ash(10)=(/2500.,2500.,2500.,2500.,2500., &
+                                                     2500.,2500.,2500.,2500.,2500. /)
+  real*8, DIMENSION (10), PARAMETER :: reff_ash(10)=(/0.5000D-3,&! 1.00 mm diameter 
+                                                      0.3750D-3,&! 0.75 mm
+						      0.1875D-3,&!
+						      93.750D-6,&!
+						      46.875D-6,&!
+						      23.437D-6,&!
+						      11.719D-6,&!
+						      05.859D-6,&!
+						      02.930D-6,&!
+						      00.975D-6 /)! 3.9 um
+! Initializing u_vect with preset dimensions - allocate not needed -SDE 2/19/16
+! REAL, ALLOCATABLE, DIMENSION(:,:,:) :: u_vect
+! Variables added at top level by SDE to be passed to vsettling subroutine -
+! Added on 2/2016
+
+! Declaring phi values  from -1 (2mm) to 8 (3.9065 um)
+  REAL*8, DIMENSION (10), PARAMETER :: diam(10)=(/2.0e-3,1.0e-3,0.5e-3,0.25e-3,&
+            125.e-6,62.5e-6,31.25e-6,15.625e-6,7.8125e-6,3.9065e-6 /)
+! REAL, ALLOCATABLE, DIMENSION(:) :: u_vect !only allocate k slice
+  real*8, DIMENSION (10) :: bstl_ash
+  integer iash
+!srf
+
+!
+! bstl is for budgets
+!
+  real*8 conver,converi
+       converi=1.e9
+       conver=1.e-9
+! LOOPS ARE OVER ALL I,J,K TILES
+! THIS IS DIFFERENT THAN IN THE VSETTLE SUBROUTINE
+! (VSETTLE LOOPS OVER MEMORY DOMAINS)
+
+! lmx is the total number of vertical tiles in the current array
+       lmx=kte-kts+1
+
+
+! begin looping over j tiles from jts to jte - ie south to north
+       do j=jts,jte
+
+! begin looping over i tiles from its to ite - ie east to west
+       do i=its,ite
+
+       kk=0
+       bstl_ash(:)=0.
+
+! begin looping over k tiles from kts to kte - ie bottom to top  
+! This creates the atmospheric data needed for the vsettle subroutine
+       do k=kts,kte
+
+!+----+--------------------------------------------------------------------------------------------
+! Water vapor emission from volcanoes - SDE
+!+----+--------------------------------------------------------------------------------------------
+          t_moist(i,k,j,p_qv) = moist(i,k,j,p_qv) + chem(i,k,j,p_vh2o)
+!+----+--------------------------------------------------------------------------------------------
+          kk=kk+1
+          p_mid(1,1,kk)=.01*p_phy(i,kte-k+kts,j)
+          ! delz is passed to the vsettle routine for 
+          ! calculating total ash mass in each i,j,k
+          delz(1,1,kk)=dz8w(i,kte-k+kts,j)
+          airmas(1,1,kk)=-(p8w(i,k+1,j)-p8w(i,k,j))/g
+          airden(1,1,kk)=rho_phy(i,k,j)
+          tmp(1,1,kk)=t_phy(i,k,j)
+          q_vapor(1,1,kk) = t_moist(i,k,j,p_qv) !SDE 2NOV18
+          rh(1,1,kk) = .95
+          rh(1,1,kk) = MIN( .95, t_moist(i,k,j,p_qv) / & !SDE 2NOV18
+               (3.80*exp(17.27*(t_phy(i,k,j)-273.)/ &
+               (t_phy(i,k,j)-36.))/(.01*p_phy(i,k,j))))
+          rh(1,1,kk)=max(1.0D-1,rh(1,1,kk))
+!         Initializing U vector for shear calculations - SDE 3/2/16
+          u_vect(1,1,kk)=u(i,k,j)
+          enddo
+! stop looping over k tiles from kts to kte 
+
+!ash settling
+
+          iseas=0
+          idust=0
+	  iash =1
+	  
+          kk=0
+!         write(0,*)'1',chem(i,1,j,p_dust_4)
+! begin looping again over k tiles from kts to kte, this time
+! running the aggregation and settling subroutine
+          !u_vect = u(i,j,k)
+          do k=kts,kte
+          kk=kk+1
+          ash(1,1,kk,1)=chem(i,k,j,p_vash_1)*conver
+          ash(1,1,kk,2)=chem(i,k,j,p_vash_2)*conver
+          ash(1,1,kk,3)=chem(i,k,j,p_vash_3)*conver
+          ash(1,1,kk,4)=chem(i,k,j,p_vash_4)*conver
+          ash(1,1,kk,5)=chem(i,k,j,p_vash_5)*conver
+          ash(1,1,kk,6)=chem(i,k,j,p_vash_6)*conver
+          ash(1,1,kk,7)=chem(i,k,j,p_vash_7)*conver
+          ash(1,1,kk,8)=chem(i,k,j,p_vash_8)*conver
+          ash(1,1,kk,9)=chem(i,k,j,p_vash_9)*conver
+          ash(1,1,kk,10)=chem(i,k,j,p_vash_10)*conver
+          enddo
+! diam, u_vect and dex have been added by SDE 2/2016
+          call vsettling(1, 1, lmx, 10, g, diam, u_vect, &
+                    dx, ash, tmp, p_mid, delz, airmas, q_vapor, &
+                    den_ash, reff_ash, dt, bstl_ash, rh, idust, iseas,iash)
+          kk=0
+          ash_fall(i,j)=ash_fall(i,j)+sum(bstl_ash(1:10))
+          do k=kts,kte
+          kk=kk+1
+            chem(i,k,j,p_vash_1)=ash(1,1,kk,1)*converi
+            chem(i,k,j,p_vash_2)=ash(1,1,kk,2)*converi
+            chem(i,k,j,p_vash_3)=ash(1,1,kk,3)*converi
+            chem(i,k,j,p_vash_4)=ash(1,1,kk,4)*converi
+            chem(i,k,j,p_vash_5)=ash(1,1,kk,5)*converi
+            chem(i,k,j,p_vash_6)=ash(1,1,kk,6)*converi
+            chem(i,k,j,p_vash_7)=ash(1,1,kk,7)*converi
+            chem(i,k,j,p_vash_8)=ash(1,1,kk,8)*converi
+            chem(i,k,j,p_vash_9)=ash(1,1,kk,9)*converi
+            chem(i,k,j,p_vash_10)=ash(1,1,kk,10)*converi
+          enddo
+
+!ash settling end
+
+
+
+
+       enddo
+       enddo
+END SUBROUTINE vash_settling_driver
+
+! u wind speed is added here for shear calcuatlions - SDE 2/16/2016
+          subroutine vsettling(imx,jmx, lmx, nmx,g0, diam, u_vect, &
+                    dx, tc, tmp, p_mid, delz, airmas, q_vapor, &
+                    den, reff, dt, bstl, rh, idust, iseas,iash)
+! ****************************************************************************
+! *                                                                          *
+! *  Calculate the loss by settling, using an implicit method                *
+! *                                                                          *
+! *  Input variables:                                                        *
+! *    SIGE(k)         - sigma coordinate of the vertical edges              *
+! *    PS(i,j)         - Surface pressure (mb)                               *
+! *    TMP(i,j,k)      - Air temperature  (K)                                *
+! *    CT(i,j)         - Surface exchange coeff for moisture
+! *                                                                          *
+! **************************************************************************** 
+
+
+  IMPLICIT  NONE
+
+  INTEGER, INTENT(IN) :: imx, jmx, lmx, nmx,iseas,idust,iash
+  INTEGER :: ntdt
+  REAL, INTENT(IN) :: dx,dt,g0 ! ,dyn_visc
+  REAL*8,    INTENT(IN) :: tmp(imx,jmx,lmx), delz(imx,jmx,lmx), &
+                         airmas(imx,jmx,lmx), rh(imx,jmx,lmx), &
+                         den(nmx), reff(nmx), p_mid(imx,jmx,lmx), &
+                         diam(nmx), q_vapor(imx,jmx,lmx)
+  REAL*8, INTENT(INOUT) :: tc(imx,jmx,lmx,nmx)
+  REAL*8, INTENT(IN)    :: u_vect(imx,jmx,lmx)
+  REAL*8, INTENT(OUT)   :: bstl(imx,jmx,nmx)
+
+  REAL*8    :: tc1(imx,jmx,lmx,nmx), dt_settl(nmx), rcm(nmx), rho(nmx)
+  INTEGER :: ndt_settl(nmx)
+  REAL*8    :: dzmin, vsettl, dtmax, pres, rhb, rwet(nmx), ratio_r(nmx)
+  REAL*8    :: addmass,c_stokes, free_path, c_cun, viscosity, vd_cor, growth_fac
+  REAL,    PARAMETER :: dyn_visc = 1.5E-5
+  INTEGER :: k, n, i, j, l, l2
+  ! for sea-salt:
+  REAL*8, PARAMETER :: c1=0.7674, c2=3.079, c3=2.573E-11, c4=-1.424 
+
+  ! for OMP:
+  REAL*8 :: rwet_priv(nmx), rho_priv(nmx), dy
+
+! ****************************************************************************
+! *                                                                          *
+! *  Ash Aggregation routine variables added by SDE - 12 / 2015              *
+! *  Remember that all ash variables are in kg units here.                   *
+! *  A description of the variables used are in the readme text.             *
+! *                                                                          *
+! ****************************************************************************
+  
+  CHARACTER (LEN=80) :: message
+  INTEGER   :: debug_level_yu
+  REAL*8    :: ntot, dntot, ab, as, ads, ati, rho_shear, eta
+  REAL*8    :: dntotas, dntotab, dntotads
+  REAL*8    :: alpha_sum, alpha2_sum, bphi1, bphi2, phi, df
+  REAL*8    :: alpha, rho_hat, xp, xl, xs, totmass, pp
+  REAL*8    :: rho_l, rho_s, rho_g
+  
+  REAL*8, DIMENSION(10) ::  nfrac, nbin, massfrac, massbin, dmass
+  REAL*8, DIMENSION(10) ::  alpha_n
+  ! default values
+  !The following line implies the tiles are square... dy=dx
+  !If we use non square dims then we need to change this. 
+  dy=dx
+  ! Set fractal dimension, Df, here
+  df = 3.0
+  ! Hard coded densities based on Folch et al., 2015 Table 2
+  rho_l = 1000.
+  rho_s = 920.
+  
+  ! Using hard coded viscosity
+  viscosity=1.5e-5
+
+! In lieu of using variable densities for ash bins, we use a fixed 
+! 2500 g/m3 here. SDE 11/2015
+  pp = 2500.
+
+! Settling routine stuff
+  ! executable statements
+
+! IF (type) /= 'dust' .AND. TRIM(aero_type) /= 'sea_salt') RETURN
+  if(idust.ne.1.and.iseas.ne.1.and.iash.ne.1)return
+
+  WHERE (tc(:,:,:,:) < 0.0) tc(:,:,:,:) = 1.0d-32
+  dzmin = MINVAL(delz(:,:,:))
+  IF (idust == 1)     growth_fac = 1.0
+  IF (iseas == 1)     growth_fac = 3.0
+  IF (iash  == 1)     growth_fac = 1.0
+  
+! Begin looping over the ash bins - nmx
+  DO k = 1,nmx
+
+     ! Settling velocity (m/s) for each tracer (Stokes Law)
+     ! DEN         density                        (kg/m3)
+     ! REFF        effective radius               (m)
+     ! dyn_visc    dynamic viscosity              (kg/m/s)
+     ! g0          gravity                        (m/s2)
+     ! 3.0         corresponds to a growth of a factor 3 of radius with 100% RH
+     ! 0.5         upper limit with temp correction
+
+     tc1(:,:,:,k) = tc(:,:,:,k)
+     vsettl = 2.0/9.0 * g0 * den(k) * (growth_fac*reff(k))**2 / &
+              (0.5*dyn_visc)
+
+     ! Determine the maximum time-step satisying the CFL condition:
+     ! dt <= (dz)_min / v_settl
+     ntdt=INT(dt)
+     dtmax = dzmin / vsettl
+     ndt_settl(k) = MAX( 1, INT( ntdt /dtmax) )
+     ! limit maximum number of iterations
+     IF (ndt_settl(k) > 12) ndt_settl(k) = 12
+     dt_settl(k) = REAL(ntdt) / REAL(ndt_settl(k))
+
+     ! Particles radius in centimeters
+     IF (iseas.eq.1)rcm(k) = reff(k)*100.0
+!srf     IF (idust.eq.1)then
+     IF (idust.eq.1   .or. iash==1)then
+          rwet(k) = reff(k)
+          ratio_r(k) = 1.0
+          rho(k) = den(k)
+      endif
+  END DO
+
+  ! Solve the bidiagonal matrix (l,l)
+
+!$OMP PARALLEL DO &
+!$OMP DEFAULT( SHARED ) &
+!$OMP PRIVATE( i,   j,   l,   l2, n,   k,   rhb, rwet_priv, ratio_r, c_stokes)&
+!$OMP PRIVATE( free_path, c_cun, viscosity, rho_priv, vd_cor )
+
+  ! Loop over latitudes
+  DO j = 1,jmx
+ 
+     DO k = 1,nmx
+        IF (idust.eq.1 .or. iash==1) THEN
+           rwet_priv(k) = rwet(k)
+           rho_priv(k)  = rho(k)
+        END IF
+
+        DO n = 1,ndt_settl(k)
+
+           ! Solve each vertical layer successively (layer l)
+      
+           DO l = lmx,1,-1
+              l2 = lmx - l + 1
+
+!           DO j = 1,jmx
+              DO i = 1,imx
+
+                 ! Dynamic viscosity
+                 c_stokes = 1.458E-6 * tmp(i,j,l)**1.5/(tmp(i,j,l) + 110.4) 
+
+                 ! Mean free path as a function of pressure (mb) and 
+                 ! temperature (K)
+                 ! order of p_mid is top->sfc
+                 free_path = 1.1E-3/p_mid(i,j,l2)/SQRT(tmp(i,j,l))
+!!!                 free_path = 1.1E-3/p_edge(i,j,l2)/SQRT(tmp(i,j,l))
+
+                 ! Slip Correction Factor
+                 c_cun = 1.0+ free_path/rwet_priv(k)* &
+                      (1.257 + 0.4*EXP(-1.1*rwet_priv(k)/free_path))
+
+                 ! Corrected dynamic viscosity (kg/m/s)
+                 viscosity = c_stokes / c_cun
+
+                 ! Settling velocity
+!                IF (iseas.eq.1) THEN
+!                   rho_priv(k) = ratio_r(k)*den(k) + (1.0 - ratio_r(k))*1000.0
+!                END IF
+
+                 vd_cor = 2.0/9.0*g0*rho_priv(k)*rwet_priv(k)**2/viscosity
+
+                 ! Update mixing ratio
+                 ! Order of delz is top->sfc
+                 IF (l == lmx) THEN
+                    tc(i,j,l,k) = tc(i,j,l,k) / &
+                         (1.0 + dt_settl(k)*vd_cor/delz(i,j,l2))
+                 ELSE
+                    tc(i,j,l,k) = 1.0/(1.0+dt_settl(k)*vd_cor/delz(i,j,l2))&
+                         *(tc(i,j,l,k) + dt_settl(k)*vd_cor /delz(i,j,l2-1) &
+                         * tc(i,j,l+1,k))
+                 END IF
+              END DO   !i
+!           END DO   !j
+        END DO  !l
+
+     END DO  !n
+  END DO  !k
+
+  END DO   !j
+!$OMP END PARALLEL DO
+
+  DO n = 1,nmx
+     DO i = 1,imx
+        DO j = 1,jmx
+           bstl(i,j,n) = 0.0
+           addmass=0.
+           DO l = 1,lmx
+              addmass=addmass+(tc(i,j,l,n) - tc1(i,j,l,n)) * airmas(i,j,l)
+              IF (tc(i,j,l,n) < 0.0) tc(i,j,l,n) = 1.0D-32
+           END DO
+           if(addmass.gt.0.)addmass=0
+           bstl(i,j,n) = bstl(i,j,n) - addmass
+        END DO
+     END DO
+  END DO
+
+! ****************************************************************************
+! *  Do loop for calculating aggregation at each i,j,k grid cell at time t   *
+! *  All loops including nmx begin at index 2, since vash_1 is not included  *
+! ****************************************************************************
+
+!Loop definitions
+!i,imx - grid cells in x
+!j,jmx - grid cells in y
+!j,lmx - grid cells in z - vertical
+!time is passed by subroutine
+
+     DO i = 1,imx
+        DO j = 1,jmx
+           DO l = 1,lmx
+             ! Ambient air density, rho_g, from sum of mass of air + mass H2O
+             ! This variable no longer used as of 3/2016
+             rho_g = airmas(i,j,l)/delz(i,j,l) + q_vapor(i,j,l)*airmas(i,j,l)*dx*dy
+             
+             ! Calculate Brownian Kernel
+             ab = ((-4./3.)*1.381e-23*tmp(i,j,l))/viscosity ! i,j,l since scripted above 
+
+             ! Calculate Shear kernel 
+             ! If statement selects which z cell to use in dU calculation
+             IF (l.eq.1) THEN
+               as = -(2./3.)*((ABS(u_vect(i,j,l)-u_vect(i,j,l+1))*rho_l)/delz(i,j,l))* &
+               ((6./3.141592)**(1./3.))**(3.)
+             ELSE
+               as = -(2./3.)*((ABS(u_vect(i,j,l)-u_vect(i,j,l-1))*rho_l)/delz(i,j,l))* &
+               ((6./3.141592)**(1./3.))**(3.) 
+             END IF
+
+             ! Calculate Differential Sedimentation kernel 
+             ads = ((-3.1416*(pp-50.)*9.81*(((6./3.141592)**(1./3.))**(4.)))/(48.*viscosity))
+
+             ! Initialize phi, ntot and totmass variables with 0. value. 
+             phi = 0.
+             ntot = 0.
+             totmass=0.
+
+             ! Loop over n ash bins (VASH_2 through VASH_10)
+             ! and calculate the individual sticking efficiencies
+             ! The lookup table was created from a literature review
+             ! conducted by Alexa Van Eaton 2015. RH in percent, diam
+             ! is converted to meters via ten to 6 conversion. 
+             DO n = 2, nmx
+               IF(rh(i,j,l).lt.0.01)THEN
+                 alpha_n(n)=exp(-diam(n)*1.e6*0.02)
+               ELSEIF(rh(i,j,l).ge.0.01.and.rh(i,j,l).le.0.10)THEN
+                 alpha_n(n)=exp(-diam(n)*1.e6*0.008)
+               ELSEIF(rh(i,j,l).gt.0.10.and.rh(i,j,l).le.0.150)THEN
+                 alpha_n(n)=exp(-diam(n)*1.e6*0.004)                
+               ELSEIF(rh(i,j,l).gt.0.150.and.rh(i,j,l).le.0.25)THEN
+                 alpha_n(n)=exp(-diam(n)*1.e6*0.002)
+               ELSEIF(rh(i,j,l).gt.0.25.and.rh(i,j,l).le.1.0)THEN
+                 alpha_n(n)=exp(-diam(n)*1.e6*0.00005)
+               ELSE
+               ! If there is an error getting the RH, we use a defualt value
+               ! from Costa et al., 2010 assuming ice - This will greatly underestimate
+               ! the aggregation as it assumes all ash particles are ice covered
+                 alpha_n(n)=0.09
+               END IF
+             END DO
+             
+             ! Loop over n ash bins and calculate:
+             ! 1) massbin - The mass of ash in each bin - kg/kg -> kg/m3
+             ! 2) totmass - The total mass by summing the mass in each bin
+             ! 3) phi - The solid volume fraction 
+             ! 4) nbin - The number of primary particles in each bin 
+             ! 5) ntot - The total number of primary particles of all bins
+             DO n = 2, nmx
+               IF (tc(i,j,l,n) < 0.0) tc(i,j,l,n) = 1.0D-32
+               massbin(n)=(tc(i,j,l,n)*airmas(i,j,l))/delz(i,j,l)!kg/m3
+               totmass = totmass + massbin(n) !kg/m3
+               phi = phi + (((tc(i,j,l,n)*airmas(i,j,l))/delz(i,j,l))/2500.)
+               nbin(n)=((6.*massbin(n))/(3.141592*2600.))*&
+               ABS((1/(diam(n-1)**3.))-(1/(diam(n)**3.)))
+               ntot = ntot + nbin(n)
+               CALL get_wrf_debug_level(debug_level_yu)
+               IF (massbin(n).lt.0.0) THEN
+                 CALL wrf_message ( message )
+                 WRITE(message,*) "massbin-n       = ",massbin(n)
+               END IF
+               IF (nbin(n).lt.0.0) THEN
+                 CALL wrf_message ( message )
+                 WRITE(message,*) "nbin-n       = ",nbin(n)
+               END IF
+             END DO
+               IF (totmass.lt.0.0) THEN
+                 CALL wrf_message ( message )
+                 WRITE(message,*) "totmass       = ",totmass
+               END IF
+               IF (phi.lt.0.0) THEN
+                 CALL wrf_message ( message )
+                 WRITE(message,*) "phi       = ",phi
+               END IF
+               IF (ntot.lt.0.0) THEN
+                 CALL wrf_message ( message )
+                 WRITE(message,*) "ntot       = ",ntot
+               END IF
+
+             ! In calculating ntot above, we did not multiply by 1/3ln(2)
+             ! see Folch et al. 2015
+             ntot = ntot * 1.107309 ! Where 1.107309 = 1/3ln(2) 
+
+             ! Calculate the contribution of each bin to the total number
+             ! of primary particles and store in nfrac
+             DO n = 2, nmx
+               nfrac(n) = nbin(n)/ntot
+               IF (nfrac(n).lt.0.0) THEN
+                 CALL wrf_message ( message )
+                 WRITE(message,*) "nfrac-n       = ",nfrac(n)
+               END IF
+             END DO
+
+             ! Begin calcualtions of class averaged sticking efficiency by
+             ! initializing alpha_sum and alpha2_sum
+             alpha = 0.0
+             alpha_sum=0.0
+             alpha2_sum=0.0
+
+             ! Calculate the numerator (alpha2_sum) and the denominator
+             ! (alpha_sum) 
+             DO n = 2,nmx
+               IF(n.eq.2)THEN
+                 alpha_sum=alpha_sum+(nfrac(n)*nfrac(n+1))
+               ELSE
+                 alpha_sum=alpha_sum+(nfrac(n-1)*nfrac(n))
+               END IF
+               alpha2_sum=alpha_sum*alpha_n(n)
+             END DO
+
+             ! Calculate the total sticking efficiency  
+             alpha = alpha2_sum/alpha_sum
+             
+             ! Sanity check - alpha must be > 0.0
+             alpha = ABS(alpha)
+
+             ! Calculate the total number of primary particles going towards
+             ! the formation of aggregates  
+             dntot=((alpha*(ABS(ab*(ntot)*ntot))&
+                     +(ABS(as*(phi**(3./df))*(ntot**(2.-(3./df)))))&
+                     +(ABS(ads*(phi**(4./df))*(ntot**(2.-(4./df))))))*dt)
+               IF (dntot.lt.0.0) THEN
+                 CALL wrf_message ( message )
+                 WRITE(message,*) "dntot       = ",dntot
+               END IF
+
+             ! These equations are for use in running the code with single
+             ! kernels - Comment previous equation and use these instead to
+             ! insepct AS, ADS and AB independently.
+              !dntotab=alpha*(ABS(ab*(ntot)*ntot))*dt
+              !dntotads=alpha*ABS(ads*(phi**(4./df))*(ntot**(2.-(4./df))))*dt
+              !dntotas=alpha*ABS(as*(phi**(3./df))*(ntot**(2.-(3./df))))*dt
+
+             ! Calcualte the mass of the particles going to form aggregates -
+             ! Equation 6 in Costa et al., 2010 assuming spherical particles
+             DO n=2, nmx
+               ! dmass needs to be in kg ash/kg air (same as tc)
+               ! so we append the conversion (delz / airmas)
+               dmass(n)=((((1./6.)*dntot*2500.*3.14*diam(n)**(3.))*delz(i,j,l))/airmas(i,j,l))*nfrac(n)
+               IF (dmass(n).lt.0.0) THEN
+                 CALL wrf_message ( message )
+                 WRITE(message,*) "dmass-n       = ",dmass(n)
+               END IF
+             END DO
+
+             ! Update the mixing ratio (tc) by subtracting the mass from each
+             ! bin and adding to VASH_1
+             DO n=2, nmx
+               IF (dmass(n) < 0.0) dmass(n) = 1.0D-32
+               tc(i,j,l,n)=tc(i,j,l,n)-dmass(n)
+               IF (tc(i,j,l,n) < 0.0) tc(i,j,l,n) = 1.0D-32
+               tc(i,j,l,1)=tc(i,j,l,1)+dmass(n)
+             END DO
+       
+             ! Debugging calls - Set debugging level to 1 in namelist.input for
+             ! the following diagnostics
+              CALL get_wrf_debug_level(debug_level_yu)
+              IF (debug_level_yu.ge.10000) THEN
+                CALL wrf_message ( message )
+                WRITE(message,*) "Temp       = ",tmp(i,j,l)
+                CALL wrf_message ( message )
+                WRITE(message,*) "Viscocity  = ",viscosity
+                CALL wrf_message ( message )
+                WRITE(message,*) "U_2 VECTOR = ",(u_vect(i,j,l))
+                CALL wrf_message ( message )
+                WRITE(message,*) "Total Mass = ",totmass
+                CALL wrf_message ( message )
+                WRITE(message,*) "dNtot      = ",dntot
+                CALL wrf_message ( message )
+                WRITE(message,*) "AB         = ",ab
+                CALL wrf_message ( message )
+                WRITE(message,*) "AS         = ",as 
+                CALL wrf_message ( message )
+                WRITE(message,*) "ADS        = ",ads
+                CALL wrf_message ( message )
+                WRITE(message,*) "Ntot       = ",ntot
+                CALL wrf_message ( message )
+                WRITE(message,*) "phi        = ",phi
+                CALL wrf_message ( message )
+                WRITE(message,*) "dNtot-AB   = ",dntotab
+                CALL wrf_message ( message )
+                WRITE(message,*) "dNtot-ADS  = ",dntotads
+                CALL wrf_message ( message )
+                WRITE(message,*) "dNtot-AS   = ",dntotas
+                CALL wrf_message ( message )
+                WRITE(message,*) "Rel Hum    = ",rh(i,j,l)
+                CALL wrf_message ( message ) 
+                DO n=2, nmx
+                   WRITE(0,*) "dMass = ",dmass(n)
+                END DO
+              END IF
+           END DO
+        END DO
+     END DO
+
+END SUBROUTINE vsettling
+
+END MODULE MODULE_VASH_SETTLING
